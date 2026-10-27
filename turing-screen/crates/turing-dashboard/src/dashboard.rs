@@ -5,7 +5,7 @@
 use std::error::Error;
 use std::io::Write;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Local};
 use turing_canvas::{Canvas, Color, Font};
@@ -18,6 +18,40 @@ use crate::widgets::{bar, fit_px, grow, sparkline, text_box, thread_bars, trunca
 
 /// Delay between reconnect attempts after a display error.
 pub const RETRY: Duration = Duration::from_secs(2);
+
+/// How long after a wall-clock second boundary an aligned tick wakes, so
+/// the sampled time is safely in the new second.
+pub const ALIGN_SLACK: Duration = Duration::from_millis(10);
+
+/// Shortest refresh interval: sysinfo needs at least 200 ms between CPU
+/// refreshes for valid loads.
+pub const MIN_INTERVAL: Duration = Duration::from_millis(200);
+
+/// `ms` milliseconds as a refresh interval, raised to [`MIN_INTERVAL`].
+pub fn interval_from_ms(ms: u64) -> Duration {
+    Duration::from_millis(ms).max(MIN_INTERVAL)
+}
+
+/// For an `interval` that is a whole number of seconds, the delay from
+/// `now` (time since the Unix epoch) to the next tick: the first instant
+/// strictly after `now` that is a multiple of `interval` since the epoch
+/// plus [`ALIGN_SLACK`]. With a 1 s interval each tick samples the clock just
+/// after a second boundary, so the displayed seconds never skip or repeat.
+/// `None` for any other interval.
+pub fn delay_to_aligned_tick(now: Duration, interval: Duration) -> Option<Duration> {
+    let i = interval.as_nanos();
+    if i == 0 || interval.subsec_nanos() != 0 {
+        return None;
+    }
+    let (n, slack) = (now.as_nanos(), ALIGN_SLACK.as_nanos());
+    let k = if n < slack { 0 } else { (n - slack) / i + 1 };
+    Some(Duration::from_nanos((k * i + slack - n) as u64))
+}
+
+/// Wall-clock time since the Unix epoch (zero if the clock is before it).
+fn wall_clock() -> Duration {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default()
+}
 
 /// Panel brightness sent on (re)connect: `0` is brightest.
 const BRIGHTNESS: u8 = 0;
@@ -225,8 +259,12 @@ pub fn run(
 /// one `interval` so CPU loads are valid on the first frame, and per tick:
 /// sample, render, flush, and log one line to stderr. A flush error drops
 /// the display; `connect` is retried no more often than every `retry`, and
-/// a successful (re)connect forces a full frame. Ticks are
-/// aligned to `interval` boundaries; a slow tick skips missed boundaries.
+/// a successful (re)connect forces a full frame. When `interval` is a whole
+/// number of seconds, ticks after the first wake just after wall-clock
+/// boundaries (see [`delay_to_aligned_tick`]) so the displayed clock never
+/// skips or repeats a second; otherwise they are aligned to `interval`
+/// boundaries of a monotonic clock. Either way a slow tick skips missed
+/// boundaries.
 pub fn run_with<W: Write>(
     sampler: &mut dyn Sampler,
     connect: &mut dyn FnMut() -> Result<Display<W>, Box<dyn Error>>,
@@ -284,12 +322,15 @@ pub fn run_with<W: Write>(
         if done(tick) {
             break;
         }
-        next += interval;
-        let now = Instant::now();
-        while next <= now {
+        let delay = delay_to_aligned_tick(wall_clock(), interval).unwrap_or_else(|| {
             next += interval;
-        }
-        thread::sleep(next - now);
+            let now = Instant::now();
+            while next <= now {
+                next += interval;
+            }
+            next - now
+        });
+        thread::sleep(delay);
     }
     Ok(())
 }

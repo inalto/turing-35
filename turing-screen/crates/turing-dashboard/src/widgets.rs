@@ -58,21 +58,34 @@ pub fn bar(canvas: &mut Canvas, backdrop: &Canvas, rect: Rect, value01: f32) {
 }
 
 /// One vertical `CYAN` bar per entry of `loads01` (each `0..=1`), left to
-/// right, `max(4, w / n − 2)` wide with a 2-px gap, filled bottom-up over a
-/// faint track. Bars that would not fit in `rect` are not drawn.
+/// right, filled bottom-up over a faint track. With `n` entries the bars are
+/// `w / n − gap` wide, with the widest gap that still leaves usable bars:
+/// [`THREAD_GAP`] (2 px) while bars are at least [`THREAD_MIN_W`] wide (up to
+/// 36 threads in the dashboard), then 1 px while they are at least 2 px wide
+/// (up to 72), then 0 px. With more entries than `w` pixels, adjacent entries
+/// are averaged so every one is still represented.
 pub fn thread_bars(canvas: &mut Canvas, backdrop: &Canvas, rect: Rect, loads01: &[f32]) {
     canvas.blit_from(backdrop, rect);
-    let n = loads01.len() as u16;
-    if n == 0 {
+    if loads01.is_empty() || rect.w == 0 {
         return;
     }
-    let bw = (rect.w / n).saturating_sub(THREAD_GAP).max(THREAD_MIN_W);
-    for (i, &load) in loads01.iter().enumerate() {
-        let x = rect.x as u32 + i as u32 * (bw + THREAD_GAP) as u32;
-        if x + bw as u32 > (rect.x + rect.w) as u32 {
-            break;
-        }
-        let x = x as u16;
+    let averaged: Vec<f32>;
+    let loads = if loads01.len() > rect.w as usize {
+        let group = loads01.len().div_ceil(rect.w as usize);
+        averaged = loads01.chunks(group).map(|g| g.iter().map(|&v| unit(v)).sum::<f32>() / g.len() as f32).collect();
+        &averaged[..]
+    } else {
+        loads01
+    };
+    let n = loads.len() as u16;
+    let per = rect.w / n; // >= 1: at most one bar per pixel
+    let gap = [(THREAD_GAP, THREAD_MIN_W), (1, 2)]
+        .into_iter()
+        .find(|&(gap, min_w)| per >= min_w + gap)
+        .map_or(0, |(gap, _)| gap);
+    let bw = per - gap;
+    for (i, &load) in loads.iter().enumerate() {
+        let x = rect.x + i as u16 * per;
         canvas.blend_rect(Rect { x, y: rect.y, w: bw, h: rect.h }, CYAN, THREAD_TRACK_ALPHA);
         let fh = ((unit(load) * rect.h as f32).round() as u16).min(rect.h);
         if fh > 0 {

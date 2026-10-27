@@ -1,15 +1,18 @@
 //! `turing-dashboard [--port COMx] [--interval MS] [--ticks N]`
 //!
 //! Draws the cyberpunk telemetry dashboard on the Turing 3.5" display and
-//! refreshes it every `MS` milliseconds (default 1000), forever or for `N`
-//! rendered frames. One line per tick is logged to stderr.
+//! refreshes it every `MS` milliseconds (default 1000, at least 200, the
+//! shortest interval sysinfo can measure CPU load over), forever or for `N`
+//! rendered frames. Whole-second intervals tick just after wall-clock second
+//! boundaries. One line per tick is logged to stderr.
 use std::time::Duration;
 
-use turing_dashboard::dashboard::run;
+use turing_dashboard::dashboard::{interval_from_ms, run};
 use turing_dashboard::telemetry::SysInfoSampler;
 
 fn usage() -> ! {
     eprintln!("usage: turing-dashboard [--port COMx] [--interval MS=1000] [--ticks N]");
+    eprintln!("  --interval is raised to at least 200 ms (sysinfo's minimum CPU refresh interval)");
     std::process::exit(2)
 }
 
@@ -29,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--port" => port = Some(args.next().unwrap_or_else(|| usage())),
-            "--interval" => interval = Duration::from_millis(positive(args.next())),
+            "--interval" => interval = interval_from_ms(positive(args.next())),
             "--ticks" => ticks = Some(positive(args.next())),
             _ => usage(),
         }

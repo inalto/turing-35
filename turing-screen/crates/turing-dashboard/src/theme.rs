@@ -43,9 +43,10 @@ pub const BAR_GLOW_ALPHA: u8 = 60;
 pub const BAR_WARN: f32 = 0.85;
 /// Opacity of a thread bar's `CYAN` track.
 pub const THREAD_TRACK_ALPHA: u8 = 25;
-/// Gap between thread bars.
+/// Gap between thread bars (narrowed to 1 px, then 0 px, when there are too
+/// many threads for bars of [`THREAD_MIN_W`]).
 pub const THREAD_GAP: u16 = 2;
-/// Minimum thread bar width.
+/// Minimum thread bar width at the full [`THREAD_GAP`].
 pub const THREAD_MIN_W: u16 = 4;
 /// Opacity of a sparkline's glow, one row below the line.
 pub const SPARK_GLOW_ALPHA: u8 = 70;

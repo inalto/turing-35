@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use chrono::{Local, TimeZone};
 use turing_canvas::{Canvas, Color, Font};
-use turing_dashboard::dashboard::{run_with, Dashboard};
+use turing_dashboard::dashboard::{delay_to_aligned_tick, interval_from_ms, run_with, Dashboard, ALIGN_SLACK, MIN_INTERVAL};
 use turing_dashboard::telemetry::{GpuStats, Ring, Sampler, Snapshot};
 use turing_dashboard::theme::*;
 use turing_dashboard::widgets::{bar, sparkline, text_box, thread_bars};
@@ -141,6 +141,55 @@ fn thread_bars_grow_bottom_up_inside_their_rect() {
     let track = blended(BG, CYAN, THREAD_TRACK_ALPHA);
     assert_eq!(c.pixel(CPU_THREADS.x, bottom), track, "empty bar shows only its track");
     assert_eq!(c.pixel(CPU_THREADS.x + bw, bottom), BG, "gap between bars");
+}
+
+/// Runs of `CYAN` pixels along row `y` of `r`.
+fn cyan_runs(c: &Canvas, r: Rect, y: u16) -> usize {
+    let mut runs = 0;
+    let mut prev = false;
+    for x in r.x..r.x + r.w {
+        let cyan = c.pixel(x, y) == CYAN;
+        runs += usize::from(cyan && !prev);
+        prev = cyan;
+    }
+    runs
+}
+
+#[test]
+fn thread_bars_draw_all_64_threads_inside_their_rect() {
+    let bd = backdrop();
+    let mut c = copy(&bd);
+    thread_bars(&mut c, &bd, CPU_THREADS, &[1.0; 64]);
+    assert!(diff(&c, &bd).iter().all(|&p| inside(CPU_THREADS, p)));
+    assert_eq!(cyan_runs(&c, CPU_THREADS, CPU_THREADS.y), 64, "one separate full bar per thread");
+}
+
+#[test]
+fn thread_bars_between_37_and_216_threads_are_all_separate_or_adjacent_bars() {
+    let bd = backdrop();
+    for n in [37usize, 43, 44, 72, 73, 216] {
+        let mut c = copy(&bd);
+        // Alternate full and empty threads: every full thread is its own run.
+        let loads: Vec<f32> = (0..n).map(|i| if i % 2 == 0 { 1.0 } else { 0.0 }).collect();
+        thread_bars(&mut c, &bd, CPU_THREADS, &loads);
+        assert!(diff(&c, &bd).iter().all(|&p| inside(CPU_THREADS, p)), "{n} threads");
+        assert_eq!(cyan_runs(&c, CPU_THREADS, CPU_THREADS.y), n.div_ceil(2), "{n} threads");
+    }
+}
+
+#[test]
+fn more_threads_than_pixels_are_averaged_so_the_last_one_still_shows() {
+    let bd = backdrop();
+    let mut c = copy(&bd);
+    let mut loads = vec![0.0f32; 300];
+    loads[299] = 1.0;
+    thread_bars(&mut c, &bd, CPU_THREADS, &loads);
+    let changed = diff(&c, &bd);
+    assert!(changed.iter().all(|&p| inside(CPU_THREADS, p)));
+    let bottom = CPU_THREADS.y + CPU_THREADS.h - 1;
+    let cyan_bottom: Vec<u16> = (CPU_THREADS.x..CPU_THREADS.x + CPU_THREADS.w).filter(|&x| c.pixel(x, bottom) == CYAN).collect();
+    assert!(!cyan_bottom.is_empty(), "the busy last thread is represented");
+    assert!(cyan_bottom.iter().all(|&x| x >= CPU_THREADS.x + CPU_THREADS.w / 2), "{cyan_bottom:?}");
 }
 
 #[test]
@@ -454,4 +503,44 @@ fn run_without_ticks_keeps_retrying_when_no_display_is_found_at_start() {
     }));
     assert!(outcome.is_err(), "run returned instead of retrying: {:?}", outcome.ok());
     assert_eq!(attempts.get(), 4);
+}
+
+fn secs(s: u64, ms: u64) -> Duration {
+    Duration::from_secs(s) + Duration::from_millis(ms)
+}
+
+#[test]
+fn whole_second_ticks_wake_just_after_the_next_second_boundary() {
+    let one = Duration::from_secs(1);
+    assert_eq!(ALIGN_SLACK, Duration::from_millis(10));
+    assert_eq!(delay_to_aligned_tick(secs(1000, 300), one), Some(Duration::from_millis(710)));
+    assert_eq!(delay_to_aligned_tick(secs(1000, 0), one), Some(Duration::from_millis(10)));
+    assert_eq!(delay_to_aligned_tick(secs(1000, 5), one), Some(Duration::from_millis(5)));
+    // Exactly on boundary + slack (a tick that just ran): the following second.
+    assert_eq!(delay_to_aligned_tick(secs(1000, 10), one), Some(one));
+    assert_eq!(delay_to_aligned_tick(secs(1000, 11), one), Some(Duration::from_millis(999)));
+    assert_eq!(delay_to_aligned_tick(Duration::ZERO, one), Some(Duration::from_millis(10)));
+}
+
+#[test]
+fn multi_second_ticks_align_to_multiples_of_the_interval() {
+    let two = Duration::from_secs(2);
+    assert_eq!(delay_to_aligned_tick(secs(1001, 500), two), Some(Duration::from_millis(510)));
+    assert_eq!(delay_to_aligned_tick(secs(1000, 500), two), Some(Duration::from_millis(1510)));
+}
+
+#[test]
+fn fractional_intervals_are_not_aligned() {
+    assert_eq!(delay_to_aligned_tick(secs(1000, 300), Duration::from_millis(1500)), None);
+    assert_eq!(delay_to_aligned_tick(secs(1000, 300), Duration::from_millis(250)), None);
+    assert_eq!(delay_to_aligned_tick(secs(1000, 300), Duration::ZERO), None);
+}
+
+#[test]
+fn interval_is_floored_at_the_sysinfo_minimum() {
+    assert_eq!(MIN_INTERVAL, Duration::from_millis(200));
+    assert_eq!(interval_from_ms(1), MIN_INTERVAL);
+    assert_eq!(interval_from_ms(199), MIN_INTERVAL);
+    assert_eq!(interval_from_ms(200), MIN_INTERVAL);
+    assert_eq!(interval_from_ms(1000), Duration::from_secs(1));
 }
