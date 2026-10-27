@@ -67,11 +67,14 @@ pub trait Sampler {
     fn sample(&mut self) -> Snapshot;
 }
 
-/// Totals of the busiest network interface at the previous sample.
+/// Per-interface `(name, rx, tx)` byte totals.
+type NetTotals = Vec<(String, u64, u64)>;
+
+/// Network state at the previous sample: the chosen interface and the
+/// totals of every interface.
 struct NetState {
-    iface: String,
-    rx: u64,
-    tx: u64,
+    iface: Option<String>,
+    totals: NetTotals,
     at: Instant,
 }
 
@@ -156,36 +159,37 @@ impl SysInfoSampler {
         )
     }
 
-    /// `(down, up)` in bytes per second since the previous call.
+    /// `(down, up)` in bytes per second since the previous call, for the
+    /// interface chosen by [`select_interface`].
     fn throughput(&mut self) -> (f64, f64) {
         let now = Instant::now();
-        let busiest = self
+        let cur: NetTotals = self
             .networks
             .iter()
-            .max_by_key(|(_, n)| n.total_received().saturating_add(n.total_transmitted()))
-            .map(|(name, n)| (name.clone(), n.total_received(), n.total_transmitted()));
-        let Some((iface, rx, tx)) = busiest else {
-            self.net = None;
-            return (0.0, 0.0);
+            .map(|(name, n)| (name.clone(), n.total_received(), n.total_transmitted()))
+            .collect();
+        let (prev_choice, prev_totals, prev_at) = match &self.net {
+            Some(p) => (p.iface.as_deref(), p.totals.as_slice(), Some(p.at)),
+            None => (None, &[][..], None),
         };
-        let rates = match &self.net {
-            Some(prev) if prev.iface == iface => {
-                let secs = now.duration_since(prev.at).as_secs_f64();
-                if secs > 0.0 {
+        let iface = select_interface(prev_choice, prev_totals, &cur);
+        let rates = iface
+            .as_deref()
+            .and_then(|name| {
+                let (_, rx, tx) = cur.iter().find(|(n, ..)| n == name)?;
+                let (_, prx, ptx) = prev_totals.iter().find(|(n, ..)| n == name)?;
+                let secs = now.duration_since(prev_at?).as_secs_f64();
+                (secs > 0.0).then(|| {
                     (
-                        rx.saturating_sub(prev.rx) as f64 / secs,
-                        tx.saturating_sub(prev.tx) as f64 / secs,
+                        rx.saturating_sub(*prx) as f64 / secs,
+                        tx.saturating_sub(*ptx) as f64 / secs,
                     )
-                } else {
-                    (0.0, 0.0)
-                }
-            }
-            _ => (0.0, 0.0),
-        };
+                })
+            })
+            .unwrap_or((0.0, 0.0));
         self.net = Some(NetState {
             iface,
-            rx,
-            tx,
+            totals: cur,
             at: now,
         });
         rates
@@ -196,6 +200,52 @@ impl Default for SysInfoSampler {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Whether `name` is a loopback interface (`Loopback Pseudo-Interface 1`
+/// on Windows, `lo`/`lo0` elsewhere).
+fn is_loopback(name: &str) -> bool {
+    name.contains("Loopback") || name.starts_with("lo")
+}
+
+/// Choose the interface to report: the non-loopback interface whose
+/// `rx + tx` grew the most between `prev` and `cur` totals.
+///
+/// The previous choice is kept on a tie or when nothing moved. Without a
+/// usable previous choice and with no traffic, the interface with the
+/// largest lifetime total wins. Remaining ties go to the smallest name so
+/// the result never depends on enumeration order.
+fn select_interface(
+    prev_choice: Option<&str>,
+    prev: &[(String, u64, u64)],
+    cur: &[(String, u64, u64)],
+) -> Option<String> {
+    let delta = |name: &str, rx: u64, tx: u64| {
+        prev.iter()
+            .find(|(n, ..)| n == name)
+            .map(|(_, prx, ptx)| {
+                rx.saturating_sub(*prx)
+                    .saturating_add(tx.saturating_sub(*ptx))
+            })
+            .unwrap_or(0)
+    };
+    let mut candidates: Vec<(&str, u64, u64)> = cur
+        .iter()
+        .filter(|(n, ..)| !is_loopback(n))
+        .map(|(n, rx, tx)| (n.as_str(), delta(n, *rx, *tx), rx.saturating_add(*tx)))
+        .collect();
+    candidates.sort_by(|a, b| a.0.cmp(b.0));
+    let best = candidates.iter().map(|c| c.1).max()?;
+    let previous = prev_choice.and_then(|p| candidates.iter().find(|c| c.0 == p));
+    let chosen = match previous {
+        Some(p) if p.1 == best => p.0,
+        _ if best > 0 => candidates.iter().find(|c| c.1 == best)?.0,
+        _ => {
+            let top = candidates.iter().map(|c| c.2).max()?;
+            candidates.iter().find(|c| c.2 == top)?.0
+        }
+    };
+    Some(chosen.to_string())
 }
 
 /// Whether `mount` is the system drive (`C:\` on Windows, `/` elsewhere).
@@ -325,5 +375,80 @@ pub fn fmt_temp(t: Option<f32>) -> String {
     match t {
         Some(t) if t.is_finite() => format!("{}\u{b0}C", t.round() as i32),
         _ => "--".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_interface;
+
+    fn t(list: &[(&str, u64, u64)]) -> Vec<(String, u64, u64)> {
+        list.iter()
+            .map(|&(n, rx, tx)| (n.to_string(), rx, tx))
+            .collect()
+    }
+
+    #[test]
+    fn picks_the_largest_delta_not_the_largest_total() {
+        let prev = t(&[("Ethernet", 1_000_000, 0), ("Wi-Fi", 10, 10)]);
+        let cur = t(&[("Ethernet", 1_000_100, 0), ("Wi-Fi", 5_010, 10)]);
+        assert_eq!(
+            select_interface(Some("Ethernet"), &prev, &cur).as_deref(),
+            Some("Wi-Fi")
+        );
+    }
+
+    #[test]
+    fn skips_loopback_interfaces() {
+        let prev = t(&[
+            ("Loopback Pseudo-Interface 1", 0, 0),
+            ("lo", 0, 0),
+            ("Ethernet", 0, 0),
+        ]);
+        let cur = t(&[
+            ("Loopback Pseudo-Interface 1", 9_000, 9_000),
+            ("lo", 8_000, 0),
+            ("Ethernet", 1, 0),
+        ]);
+        assert_eq!(
+            select_interface(None, &prev, &cur).as_deref(),
+            Some("Ethernet")
+        );
+    }
+
+    #[test]
+    fn keeps_the_previous_choice_on_a_tie() {
+        let prev = t(&[("A", 0, 0), ("B", 0, 0)]);
+        let cur = t(&[("A", 50, 50), ("B", 100, 0)]);
+        assert_eq!(
+            select_interface(Some("B"), &prev, &cur).as_deref(),
+            Some("B")
+        );
+        assert_eq!(
+            select_interface(Some("A"), &prev, &cur).as_deref(),
+            Some("A")
+        );
+    }
+
+    #[test]
+    fn keeps_the_previous_choice_when_all_deltas_are_zero() {
+        let prev = t(&[("A", 900, 0), ("B", 5, 0)]);
+        let cur = t(&[("A", 900, 0), ("B", 5, 0)]);
+        assert_eq!(
+            select_interface(Some("B"), &prev, &cur).as_deref(),
+            Some("B")
+        );
+    }
+
+    #[test]
+    fn first_sample_falls_back_to_the_largest_total() {
+        let cur = t(&[("lo", 1 << 40, 0), ("A", 10, 0), ("B", 900, 0)]);
+        assert_eq!(select_interface(None, &[], &cur).as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn no_usable_interface_selects_nothing() {
+        assert_eq!(select_interface(None, &[], &[]), None);
+        assert_eq!(select_interface(Some("A"), &[], &t(&[("lo", 1, 1)])), None);
     }
 }
