@@ -377,7 +377,7 @@ fn run_survives_a_display_that_fails_immediately() {
 }
 
 #[test]
-fn run_fails_fast_when_no_display_can_be_opened() {
+fn bounded_run_fails_fast_when_no_display_can_be_opened() {
     let mut connect = || -> Connect { Err("no display".into()) };
     let mut sampler = FakeSampler(snapshot());
     let interval = Duration::from_millis(1);
@@ -401,4 +401,25 @@ fn run_takes_one_warm_up_sample_before_the_first_frame() {
     let mut sampler = CountingSampler(snapshot(), 0);
     run_with(&mut sampler, &mut connect, Duration::from_millis(1), Some(2), Duration::ZERO).unwrap();
     assert_eq!(sampler.1, 3, "warm-up + one per tick");
+}
+
+#[test]
+fn run_without_ticks_keeps_retrying_when_no_display_is_found_at_start() {
+    // An always-on dashboard must survive the device enumerating late. The
+    // loop never returns by itself, so the connect closure stops it with a
+    // panic after a few failed attempts; returning before that is a failure.
+    let attempts = Cell::new(0);
+    let mut connect = || -> Connect {
+        attempts.set(attempts.get() + 1);
+        if attempts.get() == 4 {
+            panic!("stop: enough attempts");
+        }
+        Err("no display".into())
+    };
+    let mut sampler = FakeSampler(snapshot());
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_with(&mut sampler, &mut connect, Duration::from_millis(1), None, Duration::ZERO)
+    }));
+    assert!(outcome.is_err(), "run returned instead of retrying: {:?}", outcome.ok());
+    assert_eq!(attempts.get(), 4);
 }

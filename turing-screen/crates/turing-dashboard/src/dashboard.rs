@@ -204,8 +204,9 @@ fn connect(port: Option<&str>) -> Result<Display<impl Write>, Box<dyn Error>> {
 /// `None`), refreshing every `interval`; stop after `ticks` rendered frames,
 /// or never. The port is released when this returns.
 ///
-/// Fails only if no display can be opened at start; later display errors
-/// are logged and retried every [`RETRY`].
+/// With `ticks` set, fails if no display can be opened at start. Otherwise
+/// display errors, including a display missing at start, are logged and
+/// retried every [`RETRY`]; the loop never dies.
 pub fn run(
     sampler: &mut dyn Sampler,
     port: Option<String>,
@@ -218,11 +219,13 @@ pub fn run(
 /// The run loop behind [`run`], with the display factory and retry delay
 /// injectable for tests.
 ///
-/// Opens the display (an error here is returned), takes a warm-up sample
-/// and sleeps one `interval` so CPU loads are valid on the first frame,
-/// then per tick: sample, render, flush, and log one line to stderr. A
-/// flush error drops the display; `connect` is retried no more often than
-/// every `retry`, and a successful reconnect forces a full frame. Ticks are
+/// Opens the display: if that fails, the error is returned when `ticks` is
+/// set (a bounded run), otherwise the loop starts without a display and
+/// retries like after a reconnect. Then takes a warm-up sample and sleeps
+/// one `interval` so CPU loads are valid on the first frame, and per tick:
+/// sample, render, flush, and log one line to stderr. A flush error drops
+/// the display; `connect` is retried no more often than every `retry`, and
+/// a successful (re)connect forces a full frame. Ticks are
 /// aligned to `interval` boundaries; a slow tick skips missed boundaries.
 pub fn run_with<W: Write>(
     sampler: &mut dyn Sampler,
@@ -232,7 +235,14 @@ pub fn run_with<W: Write>(
     retry: Duration,
 ) -> Result<(), Box<dyn Error>> {
     let interval = interval.max(Duration::from_millis(1));
-    let mut display = Some(connect()?);
+    let mut display = match connect() {
+        Ok(d) => Some(d),
+        Err(e) if ticks.is_some() => return Err(e),
+        Err(e) => {
+            eprintln!("no display yet: {e}; retrying every {retry:?}");
+            None
+        }
+    };
     let mut dash = Dashboard::new(&sampler.sample());
     thread::sleep(interval);
 
@@ -245,7 +255,7 @@ pub fn run_with<W: Write>(
             last_attempt = Instant::now();
             match connect() {
                 Ok(d) => {
-                    eprintln!("display reconnected");
+                    eprintln!("display connected");
                     dash.invalidate();
                     display = Some(d);
                 }
