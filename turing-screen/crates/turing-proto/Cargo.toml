@@ -1,0 +1,8 @@
+[package]
+name = "turing-proto"
+description = "Wire protocol for the Turing 3.5\" USB display (USB35INCHIPSV2): header packing, commands, RGB565"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

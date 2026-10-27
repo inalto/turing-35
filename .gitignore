@@ -1,0 +1,16 @@
+# Rust build output
+target/
+
+# Vendor application binaries (proprietary, 13 MB); keep its text files, INF, themes and config
+35inchENG/*.exe
+35inchENG/*.dll
+
+# Scratch output of tools/make_frame.py
+frame.bin
+frame.bin.png
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/

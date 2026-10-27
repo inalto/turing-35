@@ -1,0 +1,24 @@
+[package]
+name = "turing-daemon"
+description = "HTTP API daemon for the Turing 3.5\" USB display"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "turing-daemon"
+path = "src/main.rs"
+
+[dependencies]
+turing-proto = { workspace = true }
+turing-device = { workspace = true }
+turing-canvas = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }
+http-body-util = { workspace = true }
