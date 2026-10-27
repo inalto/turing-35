@@ -224,6 +224,38 @@ fn cpu_only_change_flushes_only_the_left_column() {
 }
 
 #[test]
+fn busy_tick_never_flushes_a_rect_across_the_column_divider() {
+    // CPU, GPU, memory, disk and network all change in the same tick, so the
+    // left and right columns change on the same rows; each flushed rect must
+    // still stay on one side of the divider.
+    let mut s = snapshot();
+    let mut dash = Dashboard::new(&s);
+    dash.render(&s);
+    let mut d = sink();
+    dash.canvas.flush(&mut d).unwrap();
+    s.time += chrono::Duration::seconds(1);
+    s.cpu_load = 88.0;
+    s.cpu_cores = vec![95.0; 16];
+    s.cpu_temp_c = Some(71.0);
+    if let Some(g) = s.gpu.as_mut() {
+        g.load = 97.0;
+        g.temp_c = Some(80.0);
+        g.vram_used = 5 * GIB;
+    }
+    s.mem_used = 27 * GIB;
+    s.disk_used = 900 * GIB;
+    s.net_down_bps = 85.0 * 1024.0 * 1024.0;
+    s.net_up_bps = 9.0 * 1024.0 * 1024.0;
+    dash.render(&s);
+    let sent = dash.canvas.flush(&mut d).unwrap();
+    assert!(sent.iter().any(|r| r.x + r.w <= COLUMN_DIVIDER_X && r.y > DIVIDER_Y), "{sent:?}");
+    assert!(sent.iter().any(|r| r.x >= COLUMN_DIVIDER_X && r.y > DIVIDER_Y), "{sent:?}");
+    for r in &sent {
+        assert!(r.x + r.w <= COLUMN_DIVIDER_X || r.x >= COLUMN_DIVIDER_X, "{r:?} crosses the divider in {sent:?}");
+    }
+}
+
+#[test]
 fn missing_gpu_shows_offline_and_no_vram_bar() {
     let mut s = snapshot();
     s.gpu = None;

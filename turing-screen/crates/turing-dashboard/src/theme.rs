@@ -154,5 +154,14 @@ pub const NET_DN_SPARK: Rect = Rect { x: 252, y: 232, w: 216, h: 36 };
 /// Upload sparkline.
 pub const NET_UP_SPARK: Rect = Rect { x: 252, y: 272, w: 216, h: 36 };
 
+// `Canvas::flush` sends the two columns as separate rects only while more
+// than `DIRTY_GAP_PX` always-unchanged columns separate them: the left
+// column's widest dynamic box ends at x = 231, the right column's bar glow
+// starts at x = 251 (19 columns between).
+const _: () = assert!(
+    MEM_BAR.x - 1 - (CPU_TEMP_BOX.x + CPU_TEMP_BOX.w) > turing_canvas::DIRTY_GAP_PX,
+    "dirty-rect split threshold must stay below the column gap"
+);
+
 /// All panel frames, drawn on the backdrop.
 pub const FRAMES: [Rect; 5] = [CPU_FRAME, GPU_FRAME, MEM_FRAME, DISK_FRAME, NET_FRAME];

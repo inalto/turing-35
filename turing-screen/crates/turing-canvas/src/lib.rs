@@ -15,6 +15,18 @@ use turing_proto::{encode_rgb, Rect};
 /// write is cheaper than many partial ones.
 pub const FULL_REDRAW_FRACTION: f32 = 0.4;
 
+/// [`Canvas::flush`] splits a dirty band at any run of unchanged columns
+/// wider than this. Every rect costs a 6-byte header and a command, so small
+/// gaps are cheaper to resend than to split at, but on a ~115 KB/s link a
+/// band spanning two widgets far apart (e.g. both columns of a dashboard)
+/// resends everything in between.
+///
+/// Layouts that rely on the split must keep more than this many
+/// always-unchanged columns between independently changing areas: the
+/// `turing-dashboard` layout guarantees 19 at its column divider, so this
+/// must stay below 19.
+pub const DIRTY_GAP_PX: u16 = 16;
+
 /// 8-bit RGB colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
@@ -313,34 +325,33 @@ impl Canvas {
         out
     }
 
-    /// Rows that differ between `old` and `new`, grouped into bands of
-    /// consecutive rows; each band spans the union of its changed columns.
+    /// Rects covering every pixel that differs between `old` and `new`,
+    /// sorted top to bottom, then left to right.
+    ///
+    /// Changed rows are grouped into row bands (a gap of 2 or more unchanged
+    /// rows separates bands). Each band is split at every run of more than
+    /// [`DIRTY_GAP_PX`] unchanged columns, then each column run is re-banded
+    /// by its own changed rows, so two widgets in the same columns are not
+    /// merged just because a third widget elsewhere spans the rows between
+    /// them. Splitting alternates between the two axes until neither splits
+    /// further; each rect is then trimmed to its changed pixels.
     fn dirty_bands(&self, old: &[u8], new: &[u8]) -> Vec<Rect> {
-        let stride = self.w as usize * 2;
-        let mut bands: Vec<Rect> = Vec::new();
-        for y in 0..self.h as usize {
-            let (o, n) = (&old[y * stride..(y + 1) * stride], &new[y * stride..(y + 1) * stride]);
-            let changed: Vec<usize> = (0..self.w as usize)
-                .filter(|&x| o[x * 2..x * 2 + 2] != n[x * 2..x * 2 + 2])
-                .collect();
-            let (Some(&x0), Some(&x1)) = (changed.first(), changed.last()) else { continue };
-            let (x0, x1) = (x0 as u16, x1 as u16);
-            match bands.last_mut() {
-                Some(b) if b.y + b.h == y as u16 => {
-                    let right = (b.x + b.w).max(x1 + 1);
-                    b.x = b.x.min(x0);
-                    b.w = right - b.x;
-                    b.h += 1;
-                }
-                _ => bands.push(Rect { x: x0, y: y as u16, w: x1 - x0 + 1, h: 1 }),
-            }
-        }
-        bands
+        let changed: Vec<bool> = old.chunks_exact(2).zip(new.chunks_exact(2)).map(|(o, n)| o != n).collect();
+        let mut rects = Vec::new();
+        let full = Rect { x: 0, y: 0, w: self.w, h: self.h };
+        split_dirty(&Mask { changed: &changed, stride: self.w as usize }, full, true, &mut rects);
+        rects.sort_by_key(|r| (r.y, r.x));
+        rects
     }
 
     /// Send what changed since the last flush. The first flush sends the full
-    /// frame; afterwards only dirty row bands are sent, unless they cover more
-    /// than [`FULL_REDRAW_FRACTION`] of the panel. Returns the rects written.
+    /// frame; afterwards only the dirty rects are sent: changed rows grouped
+    /// into bands, split wherever more than [`DIRTY_GAP_PX`] unchanged
+    /// columns (or 2 or more unchanged rows) separate changes, so distant
+    /// widgets that change on the same rows travel as separate rects. When
+    /// those rects together cover more than [`FULL_REDRAW_FRACTION`] of the
+    /// panel, one full frame is sent instead. Returns the rects written, top
+    /// to bottom, then left to right.
     pub fn flush<W: Write>(&mut self, display: &mut Display<W>) -> turing_device::Result<Vec<Rect>> {
         let full = Rect { x: 0, y: 0, w: self.w, h: self.h };
         let (width, height) = display.size();
@@ -385,5 +396,72 @@ impl Canvas {
             out.extend_from_slice(&frame[start..start + r.w as usize * 2]);
         }
         out
+    }
+}
+
+/// Changed-pixel mask of a full frame, row-major.
+struct Mask<'a> {
+    changed: &'a [bool],
+    stride: usize,
+}
+
+impl Mask<'_> {
+    fn at(&self, x: usize, y: usize) -> bool {
+        self.changed[y * self.stride + x]
+    }
+
+    /// Runs of changed rows (`rows`) or columns of `r`, as offsets
+    /// `(start, end)` from `r`'s origin, `end` exclusive. Rows separated by a
+    /// single unchanged row, or columns by at most [`DIRTY_GAP_PX`] unchanged
+    /// columns, belong to the same run.
+    fn runs(&self, r: Rect, rows: bool) -> Vec<(u16, u16)> {
+        let (x0, y0, w, h) = (r.x as usize, r.y as usize, r.w as usize, r.h as usize);
+        let (len, max_gap) = if rows { (h, 1) } else { (w, DIRTY_GAP_PX as usize) };
+        let mut out: Vec<(u16, u16)> = Vec::new();
+        for i in 0..len {
+            let hit = if rows {
+                let start = (y0 + i) * self.stride + x0;
+                self.changed[start..start + w].iter().any(|&c| c)
+            } else {
+                (y0..y0 + h).any(|y| self.at(x0 + i, y))
+            };
+            if !hit {
+                continue;
+            }
+            let i = i as u16;
+            match out.last_mut() {
+                Some((_, end)) if (i - *end) as usize <= max_gap => *end = i + 1,
+                _ => out.push((i, i + 1)),
+            }
+        }
+        out
+    }
+}
+
+/// `r` narrowed to the run `(start, end)` along rows (`rows`) or columns.
+fn narrow(r: Rect, rows: bool, (start, end): (u16, u16)) -> Rect {
+    if rows {
+        Rect { y: r.y + start, h: end - start, ..r }
+    } else {
+        Rect { x: r.x + start, w: end - start, ..r }
+    }
+}
+
+/// Push rects covering the changed pixels of `r`: split along rows
+/// (`rows`) or columns first, then along the other axis within each piece,
+/// recursively, until neither axis splits.
+fn split_dirty(mask: &Mask, r: Rect, rows: bool, out: &mut Vec<Rect>) {
+    let first = mask.runs(r, rows);
+    match first.as_slice() {
+        [] => {}
+        &[run] => {
+            let r = narrow(r, rows, run);
+            let second = mask.runs(r, !rows);
+            match second.as_slice() {
+                &[run] => out.push(narrow(r, !rows, run)),
+                _ => second.iter().for_each(|&run| split_dirty(mask, narrow(r, !rows, run), rows, out)),
+            }
+        }
+        _ => first.iter().for_each(|&run| split_dirty(mask, narrow(r, rows, run), !rows, out)),
     }
 }
