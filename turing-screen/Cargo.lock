@@ -1064,6 +1064,9 @@ dependencies = [
  "chrono",
  "nvml-wrapper",
  "sysinfo",
+ "turing-canvas",
+ "turing-device",
+ "turing-proto",
 ]
 
 [[package]]

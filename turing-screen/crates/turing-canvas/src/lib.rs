@@ -352,6 +352,12 @@ impl Canvas {
         Ok(rects)
     }
 
+    /// Forget what was last sent, so the next [`Canvas::flush`] sends the full
+    /// frame. Use after the panel lost its contents (e.g. a reconnect).
+    pub fn invalidate(&mut self) {
+        self.last_sent = None;
+    }
+
     /// Rows of `r` out of a full-frame RGB565 buffer.
     fn crop(&self, frame: &[u8], r: Rect) -> Vec<u8> {
         let stride = self.w as usize * 2;

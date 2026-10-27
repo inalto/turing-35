@@ -103,3 +103,14 @@ fn flush_sends_only_the_changed_rect_pixels_in_row_major_order() {
     let red = rgb565(255, 0, 0).to_le_bytes();
     assert_eq!(tail, [red, red, red, red].concat());
 }
+
+#[test]
+fn flush_after_invalidate_sends_the_whole_frame_again() {
+    let mut c = Canvas::landscape();
+    let mut d = sink();
+    c.flush(&mut d).unwrap();
+    c.fill_rect(Rect { x: 5, y: 5, w: 3, h: 3 }, RED);
+    c.invalidate();
+    assert_eq!(c.flush(&mut d).unwrap(), vec![FULL]);
+    assert_eq!(c.flush(&mut d).unwrap(), Vec::<Rect>::new());
+}

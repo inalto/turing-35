@@ -10,6 +10,9 @@ name = "turing-dashboard"
 path = "src/main.rs"
 
 [dependencies]
+turing-proto = { workspace = true }
+turing-device = { workspace = true }
+turing-canvas = { workspace = true }
 sysinfo = { workspace = true }
 nvml-wrapper = { workspace = true }
 chrono = { workspace = true }
