@@ -6,7 +6,7 @@ members = ["crates/turing-proto", "crates/turing-device", "crates/turing-canvas"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/inalto/turzx"
+repository = "https://github.com/inalto/turing-35"
 
 [workspace.dependencies]
 turing-proto = { path = "crates/turing-proto" }

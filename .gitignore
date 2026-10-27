@@ -1,10 +1,6 @@
 # Rust build output
 target/
 
-# Vendor application binaries (proprietary, 13 MB); keep its text files, INF, themes and config
-35inchENG/*.exe
-35inchENG/*.dll
-
 # Scratch output of tools/make_frame.py
 frame.bin
 frame.bin.png
@@ -14,3 +10,9 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# Local-only reference material, not published:
+#  - the vendor package (proprietary, see docs/APP_INTERNALS.md)
+#  - ILSpy output of the vendor binary (reference/decompiled-src/)
+35inchENG/
+reference/decompiled-src/
