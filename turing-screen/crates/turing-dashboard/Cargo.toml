@@ -1,0 +1,15 @@
+[package]
+name = "turing-dashboard"
+description = "Cyberpunk telemetry dashboard for the Turing 3.5\" USB display"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "turing-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+sysinfo = { workspace = true }
+nvml-wrapper = { workspace = true }
+chrono = { workspace = true }
