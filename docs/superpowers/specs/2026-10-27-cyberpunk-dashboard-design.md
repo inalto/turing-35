@@ -46,7 +46,7 @@ Dynamic widgets restore their rect from the backdrop, then redraw.
 ### Layout (x, y, w, h)
 
 Top bar (0,0,480,36): title `SYS://TELEMETRY` at (12,6) size 22 `CYAN`; date at (300,12)
-size 14 `DIM`; clock `HH:MM:SS` at (376,4) size 26 `TEXT`; `LIVE` dot: 6×6 `MAGENTA` at
+size 14 `DIM`; clock `HH:MM:SS` at (376,4) size 21 `TEXT` (26 would overrun the LIVE dot); `LIVE` dot: 6×6 `MAGENTA` at
 (462,15) with glow. Divider line y=38 (`CYAN` alpha 110), vertical divider x=240 from y=38 to 320.
 
 Left column (0..240):
