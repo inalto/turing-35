@@ -431,7 +431,7 @@ fn run_reconnects_after_a_write_error_and_resends_a_full_frame() {
     };
     let mut sampler = TickingSampler(snapshot());
     let interval = Duration::from_millis(1);
-    run_with(&mut sampler, &mut connect, interval, Some(4), Duration::ZERO).unwrap();
+    run_with(&mut sampler, &mut connect, interval, Some(4), Duration::ZERO, &mut std::io::sink()).unwrap();
     assert_eq!(connects.get(), 2);
     assert_eq!(sinks[0].lock().unwrap().len(), FRAME_BYTES);
     let second = sinks[1].lock().unwrap();
@@ -450,7 +450,7 @@ fn run_survives_a_display_that_fails_immediately() {
     };
     let mut sampler = FakeSampler(snapshot());
     let interval = Duration::from_millis(1);
-    run_with(&mut sampler, &mut connect, interval, Some(3), Duration::ZERO).unwrap();
+    run_with(&mut sampler, &mut connect, interval, Some(3), Duration::ZERO, &mut std::io::sink()).unwrap();
     assert_eq!(connects.get(), 2);
     let sent = bytes.lock().unwrap();
     assert_eq!(&sent[..6], &bitmap_header(SCREEN));
@@ -462,7 +462,7 @@ fn bounded_run_fails_fast_when_no_display_can_be_opened() {
     let mut connect = || -> Connect { Err("no display".into()) };
     let mut sampler = FakeSampler(snapshot());
     let interval = Duration::from_millis(1);
-    assert!(run_with(&mut sampler, &mut connect, interval, Some(1), Duration::ZERO).is_err());
+    assert!(run_with(&mut sampler, &mut connect, interval, Some(1), Duration::ZERO, &mut std::io::sink()).is_err());
 }
 
 /// Counts how often it is sampled.
@@ -480,7 +480,7 @@ fn run_takes_one_warm_up_sample_before_the_first_frame() {
     let bytes = Arc::new(Mutex::new(Vec::new()));
     let mut connect = || -> Connect { Ok(Display::new(TestSink { fail_after: None, bytes: bytes.clone() }, None)) };
     let mut sampler = CountingSampler(snapshot(), 0);
-    run_with(&mut sampler, &mut connect, Duration::from_millis(1), Some(2), Duration::ZERO).unwrap();
+    run_with(&mut sampler, &mut connect, Duration::from_millis(1), Some(2), Duration::ZERO, &mut std::io::sink()).unwrap();
     assert_eq!(sampler.1, 3, "warm-up + one per tick");
 }
 
@@ -499,7 +499,7 @@ fn run_without_ticks_keeps_retrying_when_no_display_is_found_at_start() {
     };
     let mut sampler = FakeSampler(snapshot());
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_with(&mut sampler, &mut connect, Duration::from_millis(1), None, Duration::ZERO)
+        run_with(&mut sampler, &mut connect, Duration::from_millis(1), None, Duration::ZERO, &mut std::io::sink())
     }));
     assert!(outcome.is_err(), "run returned instead of retrying: {:?}", outcome.ok());
     assert_eq!(attempts.get(), 4);
@@ -543,4 +543,27 @@ fn interval_is_floored_at_the_sysinfo_minimum() {
     assert_eq!(interval_from_ms(199), MIN_INTERVAL);
     assert_eq!(interval_from_ms(200), MIN_INTERVAL);
     assert_eq!(interval_from_ms(1000), Duration::from_secs(1));
+}
+
+#[test]
+fn run_logs_one_line_per_tick_to_the_given_sink() {
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let mut connect = || -> Connect { Ok(Display::new(TestSink { fail_after: None, bytes: bytes.clone() }, None)) };
+    let mut sampler = TickingSampler(snapshot());
+    let mut log = Vec::new();
+    run_with(&mut sampler, &mut connect, Duration::from_millis(1), Some(2), Duration::ZERO, &mut log).unwrap();
+    let log = String::from_utf8(log).unwrap();
+    assert!(log.contains("tick 1: 1 rect(s), 307206 bytes"), "{log}");
+    assert!(log.contains("tick 2: "), "{log}");
+    assert_eq!(log.lines().count(), 2, "exactly one line per tick, nothing else:
+{log}");
+}
+
+#[test]
+fn run_with_a_null_sink_writes_nothing_but_still_renders() {
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let mut connect = || -> Connect { Ok(Display::new(TestSink { fail_after: None, bytes: bytes.clone() }, None)) };
+    let mut sampler = TickingSampler(snapshot());
+    run_with(&mut sampler, &mut connect, Duration::from_millis(1), Some(2), Duration::ZERO, &mut std::io::sink()).unwrap();
+    assert!(bytes.lock().unwrap().len() > FRAME_BYTES);
 }

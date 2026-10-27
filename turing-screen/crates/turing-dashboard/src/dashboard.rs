@@ -3,7 +3,7 @@
 //! reconnect.
 
 use std::error::Error;
-use std::io::Write;
+use std::io::{self, Write};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -219,7 +219,7 @@ fn draw_backdrop(s: &Snapshot, font: &Font) -> Canvas {
 
 /// Open the display on `port` (or the first discovered one) and wake it:
 /// screen on, landscape, full brightness.
-fn connect(port: Option<&str>) -> Result<Display<impl Write>, Box<dyn Error>> {
+fn connect(port: Option<&str>, log: &mut dyn Write) -> Result<Display<impl Write>, Box<dyn Error>> {
     let port = match port {
         Some(p) => p.to_string(),
         None => discover()?
@@ -230,7 +230,7 @@ fn connect(port: Option<&str>) -> Result<Display<impl Write>, Box<dyn Error>> {
     };
     let mut display = Display::open(&port)?;
     display.init(Orientation::Landscape, BRIGHTNESS)?;
-    eprintln!("display: {port}");
+    let _ = writeln!(log, "display: {port}");
     Ok(display)
 }
 
@@ -240,14 +240,18 @@ fn connect(port: Option<&str>) -> Result<Display<impl Write>, Box<dyn Error>> {
 ///
 /// With `ticks` set, fails if no display can be opened at start. Otherwise
 /// display errors, including a display missing at start, are logged and
-/// retried every [`RETRY`]; the loop never dies.
+/// retried every [`RETRY`]; the loop never dies. Progress and errors go to
+/// stderr, or nowhere when `quiet` is set.
 pub fn run(
     sampler: &mut dyn Sampler,
     port: Option<String>,
     interval: Duration,
     ticks: Option<u64>,
+    quiet: bool,
 ) -> Result<(), Box<dyn Error>> {
-    run_with(sampler, &mut || connect(port.as_deref()), interval, ticks, RETRY)
+    let mut log: Box<dyn Write> = if quiet { Box::new(io::sink()) } else { Box::new(io::stderr()) };
+    let mut log_for_connect: Box<dyn Write> = if quiet { Box::new(io::sink()) } else { Box::new(io::stderr()) };
+    run_with(sampler, &mut || connect(port.as_deref(), &mut log_for_connect), interval, ticks, RETRY, &mut log)
 }
 
 /// The run loop behind [`run`], with the display factory and retry delay
@@ -257,7 +261,7 @@ pub fn run(
 /// set (a bounded run), otherwise the loop starts without a display and
 /// retries like after a reconnect. Then takes a warm-up sample and sleeps
 /// one `interval` so CPU loads are valid on the first frame, and per tick:
-/// sample, render, flush, and log one line to stderr. A flush error drops
+/// sample, render, flush, and log one line to `log`. A flush error drops
 /// the display; `connect` is retried no more often than every `retry`, and
 /// a successful (re)connect forces a full frame. When `interval` is a whole
 /// number of seconds, ticks after the first wake just after wall-clock
@@ -271,13 +275,14 @@ pub fn run_with<W: Write>(
     interval: Duration,
     ticks: Option<u64>,
     retry: Duration,
+    log: &mut dyn Write,
 ) -> Result<(), Box<dyn Error>> {
     let interval = interval.max(Duration::from_millis(1));
     let mut display = match connect() {
         Ok(d) => Some(d),
         Err(e) if ticks.is_some() => return Err(e),
         Err(e) => {
-            eprintln!("no display yet: {e}; retrying every {retry:?}");
+            let _ = writeln!(log, "no display yet: {e}; retrying every {retry:?}");
             None
         }
     };
@@ -293,11 +298,13 @@ pub fn run_with<W: Write>(
             last_attempt = Instant::now();
             match connect() {
                 Ok(d) => {
-                    eprintln!("display connected");
+                    let _ = writeln!(log, "display connected");
                     dash.invalidate();
                     display = Some(d);
                 }
-                Err(e) => eprintln!("reconnect failed: {e}"),
+                Err(e) => {
+                    let _ = writeln!(log, "reconnect failed: {e}");
+                }
             }
         }
 
@@ -309,14 +316,16 @@ pub fn run_with<W: Write>(
             Some(Ok(rects)) => {
                 let bytes: usize = rects.iter().map(|r| 6 + r.byte_len()).sum();
                 let ms = started.elapsed().as_millis();
-                eprintln!("tick {tick}: {} rect(s), {bytes} bytes, {ms} ms", rects.len());
+                let _ = writeln!(log, "tick {tick}: {} rect(s), {bytes} bytes, {ms} ms", rects.len());
             }
             Some(Err(e)) => {
-                eprintln!("tick {tick}: display error: {e}; retrying every {retry:?}");
+                let _ = writeln!(log, "tick {tick}: display error: {e}; retrying every {retry:?}");
                 display = None;
                 last_attempt = Instant::now();
             }
-            None => eprintln!("tick {tick}: display offline"),
+            None => {
+                let _ = writeln!(log, "tick {tick}: display offline");
+            }
         }
 
         if done(tick) {
