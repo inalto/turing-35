@@ -1,6 +1,7 @@
 //! RGB canvas with text drawing and dirty-rect flushing for the Turing 3.5" display.
 //!
-//! Draw into a [`Canvas`] with [`Canvas::fill`], [`Canvas::fill_rect`],
+//! Draw into a [`Canvas`] with [`Canvas::fill`], [`Canvas::fill_rect`], [`Canvas::blend_rect`],
+//! [`Canvas::draw_line`], [`Canvas::draw_rect_outline`], [`Canvas::blit_from`],
 //! [`Canvas::draw_rgb`] and [`Canvas::draw_text`], then call [`Canvas::flush`]
 //! to send only what changed since the previous flush.
 
@@ -152,6 +153,82 @@ impl Canvas {
                     self.put(x, y, c);
                 }
             }
+        }
+    }
+
+    /// Alpha-blend `c` over every pixel of `rect` (clipped to the canvas).
+    /// `alpha` 0 leaves the canvas untouched, 255 is equivalent to [`Canvas::fill_rect`].
+    pub fn blend_rect(&mut self, rect: Rect, c: Color, alpha: u8) {
+        if let Some(r) = self.clip(rect) {
+            for y in r.y..r.y + r.h {
+                for x in r.x..r.x + r.w {
+                    self.blend(x, y, c, alpha);
+                }
+            }
+        }
+    }
+
+    /// Draw a 1-px line from `(x0, y0)` to `(x1, y1)`, endpoints inclusive
+    /// (Bresenham). Coordinates may lie outside the canvas; each pixel is clipped.
+    pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: Color) {
+        let (mut x, mut y) = (x0 as i64, y0 as i64);
+        let (x1, y1) = (x1 as i64, y1 as i64);
+        let dx = (x1 - x).abs();
+        let dy = -(y1 - y).abs();
+        let sx = if x < x1 { 1 } else { -1 };
+        let sy = if y < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+        loop {
+            if (0..self.w as i64).contains(&x) && (0..self.h as i64).contains(&y) {
+                self.put(x as u16, y as u16, c);
+            }
+            if x == x1 && y == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    /// Draw a 1-px outline just inside `rect`; edges that fall outside the
+    /// canvas are clipped away.
+    pub fn draw_rect_outline(&mut self, rect: Rect, c: Color) {
+        if rect.w == 0 || rect.h == 0 {
+            return;
+        }
+        // Far edges are computed in u32 and skipped when beyond u16 (hence off-canvas).
+        let right = u16::try_from(rect.x as u32 + rect.w as u32 - 1).ok();
+        let bottom = u16::try_from(rect.y as u32 + rect.h as u32 - 1).ok();
+        self.fill_rect(Rect { x: rect.x, y: rect.y, w: rect.w, h: 1 }, c);
+        self.fill_rect(Rect { x: rect.x, y: rect.y, w: 1, h: rect.h }, c);
+        if let Some(y) = bottom {
+            self.fill_rect(Rect { x: rect.x, y, w: rect.w, h: 1 }, c);
+        }
+        if let Some(x) = right {
+            self.fill_rect(Rect { x, y: rect.y, w: 1, h: rect.h }, c);
+        }
+    }
+
+    /// Copy `rect` (clipped to the canvas) from `src`, which must be the same
+    /// size as `self`. Panics otherwise.
+    pub fn blit_from(&mut self, src: &Canvas, rect: Rect) {
+        assert_eq!(
+            (self.w, self.h),
+            (src.w, src.h),
+            "blit_from: source and destination canvases must be the same size"
+        );
+        let Some(r) = self.clip(rect) else { return };
+        for y in r.y..r.y + r.h {
+            let i = self.index(r.x, y);
+            let n = r.w as usize * 3;
+            self.rgb[i..i + n].copy_from_slice(&src.rgb[i..i + n]);
         }
     }
 
