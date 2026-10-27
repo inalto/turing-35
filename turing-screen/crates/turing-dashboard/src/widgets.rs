@@ -2,7 +2,7 @@
 //! static backdrop, then draws, so redrawing with the same input is a no-op
 //! for the flushed image and a shrinking value leaves no trace.
 
-use turing_canvas::{measure_text, Canvas, Color, Font};
+use turing_canvas::{line_points, measure_text, Canvas, Color, Font};
 use turing_proto::Rect;
 
 use crate::telemetry::Ring;
@@ -81,33 +81,6 @@ pub fn thread_bars(canvas: &mut Canvas, backdrop: &Canvas, rect: Rect, loads01: 
     }
 }
 
-/// Pixels of the Bresenham line from `(x0, y0)` to `(x1, y1)`, endpoints
-/// included, in the same order as [`Canvas::draw_line`] visits them.
-fn line_points(x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<(i32, i32)> {
-    let (mut x, mut y) = (x0, y0);
-    let dx = (x1 - x0).abs();
-    let dy = -(y1 - y0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx + dy;
-    let mut out = Vec::new();
-    loop {
-        out.push((x, y));
-        if x == x1 && y == y1 {
-            return out;
-        }
-        let e2 = 2 * err;
-        if e2 >= dy {
-            err += dy;
-            x += sx;
-        }
-        if e2 <= dx {
-            err += dx;
-            y += sy;
-        }
-    }
-}
-
 /// History graph of `ring` in `rect`: the newest sample sits at the right
 /// edge, each of the [`Ring::LEN`] slots is spread evenly across the width,
 /// and values are scaled to the window maximum (at least
@@ -146,7 +119,7 @@ pub fn sparkline(canvas: &mut Canvas, backdrop: &Canvas, rect: Rect, ring: &Ring
     };
     for (i, &((x0, y0), (x1, y1))) in segments.iter().enumerate() {
         // Skip each joint after the first so no glow pixel is blended twice.
-        for &(x, y) in line_points(x0, y0, x1, y1).iter().skip(usize::from(i > 0)) {
+        for (x, y) in line_points(x0, y0, x1, y1).skip(usize::from(i > 0)) {
             let glow = Rect { x: x as u16, y: (y + 1) as u16, w: 1, h: 1 };
             canvas.blend_rect(glow, color, SPARK_GLOW_ALPHA);
         }

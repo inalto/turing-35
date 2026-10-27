@@ -1,7 +1,7 @@
 //! RGB canvas with text drawing and dirty-rect flushing for the Turing 3.5" display.
 //!
 //! Draw into a [`Canvas`] with [`Canvas::fill`], [`Canvas::fill_rect`], [`Canvas::blend_rect`],
-//! [`Canvas::draw_line`], [`Canvas::draw_rect_outline`], [`Canvas::blit_from`],
+//! [`Canvas::draw_line`] (pixels from [`line_points`]), [`Canvas::draw_rect_outline`], [`Canvas::blit_from`],
 //! [`Canvas::draw_rgb`] and [`Canvas::draw_text`], then call [`Canvas::flush`]
 //! to send only what changed since the previous flush.
 
@@ -67,6 +67,42 @@ pub fn measure_text(text: &str, font: &Font, px: f32) -> (u16, u16) {
         .map(|g| g.x + g.width as f32)
         .fold(0.0f32, f32::max);
     (right.ceil() as u16, font.line_height(px).ceil() as u16)
+}
+
+/// The pixels of the Bresenham line from `(x0, y0)` to `(x1, y1)`, endpoints
+/// included, in order from start to end, unclipped. [`Canvas::draw_line`]
+/// paints exactly these pixels, so callers can decorate a line (e.g. a glow)
+/// pixel for pixel.
+pub fn line_points(x0: i32, y0: i32, x1: i32, y1: i32) -> impl Iterator<Item = (i32, i32)> {
+    let (x1, y1) = (x1 as i64, y1 as i64);
+    let (mut x, mut y) = (x0 as i64, y0 as i64);
+    let dx = (x1 - x).abs();
+    let dy = -(y1 - y).abs();
+    let sx = if x < x1 { 1 } else { -1 };
+    let sy = if y < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+    let mut done = false;
+    std::iter::from_fn(move || {
+        if done {
+            return None;
+        }
+        // Every point lies between the endpoints, so it fits back into i32.
+        let point = (x as i32, y as i32);
+        if x == x1 && y == y1 {
+            done = true;
+        } else {
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+        Some(point)
+    })
 }
 
 /// An RGB framebuffer plus the RGB565 image last sent to the panel.
@@ -168,31 +204,13 @@ impl Canvas {
         }
     }
 
-    /// Draw a 1-px line from `(x0, y0)` to `(x1, y1)`, endpoints inclusive
-    /// (Bresenham). Coordinates may lie outside the canvas; each pixel is clipped.
+    /// Draw a 1-px line from `(x0, y0)` to `(x1, y1)`, endpoints inclusive,
+    /// through the pixels of [`line_points`]. Coordinates may lie outside the
+    /// canvas; each pixel is clipped.
     pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: Color) {
-        let (mut x, mut y) = (x0 as i64, y0 as i64);
-        let (x1, y1) = (x1 as i64, y1 as i64);
-        let dx = (x1 - x).abs();
-        let dy = -(y1 - y).abs();
-        let sx = if x < x1 { 1 } else { -1 };
-        let sy = if y < y1 { 1 } else { -1 };
-        let mut err = dx + dy;
-        loop {
-            if (0..self.w as i64).contains(&x) && (0..self.h as i64).contains(&y) {
+        for (x, y) in line_points(x0, y0, x1, y1) {
+            if (0..self.w as i32).contains(&x) && (0..self.h as i32).contains(&y) {
                 self.put(x as u16, y as u16, c);
-            }
-            if x == x1 && y == y1 {
-                break;
-            }
-            let e2 = 2 * err;
-            if e2 >= dy {
-                err += dy;
-                x += sx;
-            }
-            if e2 <= dx {
-                err += dx;
-                y += sy;
             }
         }
     }

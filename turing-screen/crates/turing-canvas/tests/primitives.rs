@@ -1,4 +1,4 @@
-use turing_canvas::{Canvas, Color};
+use turing_canvas::{line_points, Canvas, Color};
 use turing_proto::Rect;
 
 const BLACK: Color = Color::rgb(0, 0, 0);
@@ -103,6 +103,49 @@ fn line_ending_beyond_the_canvas_is_clipped() {
     let mut c = Canvas::new(10, 10);
     c.draw_line(7, 7, 100, 100, WHITE);
     assert_eq!(count_pixels(&c, |p| p == WHITE), 3);
+}
+
+// ---- line_points ----
+
+#[test]
+fn line_points_run_from_start_to_end_inclusive() {
+    let pts: Vec<(i32, i32)> = line_points(1, 2, 7, 5).collect();
+    assert_eq!(pts.first(), Some(&(1, 2)));
+    assert_eq!(pts.last(), Some(&(7, 5)));
+    assert_eq!(pts.len(), 7, "one point per column of a shallow line");
+}
+
+#[test]
+fn line_points_of_a_steep_reversed_line_step_one_pixel_at_a_time() {
+    let pts: Vec<(i32, i32)> = line_points(4, 9, 2, 1).collect();
+    assert_eq!(pts.len(), 9, "one point per row of a steep line");
+    assert_eq!((pts[0], pts[8]), ((4, 9), (2, 1)));
+    for w in pts.windows(2) {
+        assert!((w[1].0 - w[0].0).abs() <= 1 && w[1].1 - w[0].1 == -1, "{w:?}");
+    }
+}
+
+#[test]
+fn line_points_of_a_degenerate_line_is_one_point() {
+    assert_eq!(line_points(3, 3, 3, 3).collect::<Vec<_>>(), vec![(3, 3)]);
+}
+
+#[test]
+fn line_points_include_off_canvas_coordinates() {
+    assert_eq!(line_points(-2, -2, 0, 0).collect::<Vec<_>>(), vec![(-2, -2), (-1, -1), (0, 0)]);
+}
+
+#[test]
+fn draw_line_paints_exactly_the_line_points() {
+    for (x0, y0, x1, y1) in [(1, 2, 17, 9), (15, 1, 2, 18), (0, 19, 19, 0), (3, 3, 3, 3), (-4, 6, 25, 11)] {
+        let mut c = Canvas::new(20, 20);
+        c.draw_line(x0, y0, x1, y1, WHITE);
+        let mut expected = Canvas::new(20, 20);
+        for (x, y) in line_points(x0, y0, x1, y1).filter(|&(x, y)| (0..20).contains(&x) && (0..20).contains(&y)) {
+            expected.fill_rect(Rect { x: x as u16, y: y as u16, w: 1, h: 1 }, WHITE);
+        }
+        assert_eq!(c.as_rgb(), expected.as_rgb(), "line ({x0},{y0})-({x1},{y1})");
+    }
 }
 
 // ---- draw_rect_outline ----
