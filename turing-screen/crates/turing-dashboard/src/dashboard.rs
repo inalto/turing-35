@@ -240,17 +240,17 @@ fn connect(port: Option<&str>, log: &mut dyn Write) -> Result<Display<impl Write
 ///
 /// With `ticks` set, fails if no display can be opened at start. Otherwise
 /// display errors, including a display missing at start, are logged and
-/// retried every [`RETRY`]; the loop never dies. Progress and errors go to
-/// stderr, or nowhere when `quiet` is set.
+/// retried every [`RETRY`]; the loop never dies. Silent unless `debug` is
+/// set, which logs progress and errors to stderr.
 pub fn run(
     sampler: &mut dyn Sampler,
     port: Option<String>,
     interval: Duration,
     ticks: Option<u64>,
-    quiet: bool,
+    debug: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let mut log: Box<dyn Write> = if quiet { Box::new(io::sink()) } else { Box::new(io::stderr()) };
-    let mut log_for_connect: Box<dyn Write> = if quiet { Box::new(io::sink()) } else { Box::new(io::stderr()) };
+    let mut log: Box<dyn Write> = if debug { Box::new(io::stderr()) } else { Box::new(io::sink()) };
+    let mut log_for_connect: Box<dyn Write> = if debug { Box::new(io::stderr()) } else { Box::new(io::sink()) };
     run_with(sampler, &mut || connect(port.as_deref(), &mut log_for_connect), interval, ticks, RETRY, &mut log)
 }
 

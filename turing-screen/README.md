@@ -17,7 +17,7 @@ cargo run -p turing-device --example show_png -- ../tools/test_frame_preview.png
 cargo run -p turing-device --example show_png -- picture.jpg COM20                      # explicit port
 cargo run -p turing-canvas --example counter -- 10                                       # dirty-rect demo
 cargo run -p turing-daemon -- --listen 127.0.0.1:8686 [--port COM20] [--orientation portrait]
-cargo run --release -p turing-dashboard -- [--port COM20] [--interval 1000] [--ticks N] [--quiet]   # --interval >= 200 ms; --quiet silences stderr
+cargo run --release -p turing-dashboard -- [--port COM20] [--interval 1000] [--ticks N] [--debug]   # --interval >= 200 ms; silent unless --debug
 ```
 
 ## HTTP API (`turing-daemon`)
