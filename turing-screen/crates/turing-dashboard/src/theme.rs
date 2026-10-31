@@ -1,6 +1,6 @@
-//! Palette, font sizes and layout of the cyberpunk dashboard (480×320,
-//! landscape). Every value comes from the design spec; text boxes start at
-//! the spec's text position and extend to the next element.
+//! Palette, font sizes and layout of the cyberpunk dashboard (320×480,
+//! portrait). Panels stack in one full-width column, memory and disk side by
+//! side; text boxes start at the text position and extend to the next element.
 
 use turing_canvas::Color;
 use turing_proto::Rect;
@@ -19,9 +19,9 @@ pub const TEXT: Color = Color::rgb(0xF2, 0xF2, 0xFF);
 pub const DIM: Color = Color::rgb(0x6E, 0x6A, 0x8C);
 
 /// Canvas width in pixels.
-pub const WIDTH: u16 = 480;
+pub const WIDTH: u16 = 320;
 /// Canvas height in pixels.
-pub const HEIGHT: u16 = 320;
+pub const HEIGHT: u16 = 480;
 
 /// Spacing of the backdrop grid.
 pub const GRID_STEP: u16 = 24;
@@ -59,9 +59,7 @@ pub const SPARK_MIN_SCALE: f32 = 1024.0;
 pub const TITLE_PX: f32 = 22.0;
 /// Labels, date, hardware names and the VRAM line.
 pub const LABEL_PX: f32 = 14.0;
-/// Clock size. The spec asks for 26, but at 26 px Roboto's `HH:MM:SS` is
-/// 103 px wide and would run over the LIVE dot; this is the largest size
-/// that ends left of the dot's glow.
+/// Clock size (`HH:MM:SS` is 103 px wide at this size).
 pub const CLOCK_PX: f32 = 21.0;
 /// CPU and GPU load.
 pub const BIG_PX: f32 = 48.0;
@@ -70,98 +68,114 @@ pub const TEMP_PX: f32 = 26.0;
 /// Memory, disk and network values.
 pub const VALUE_PX: f32 = 18.0;
 /// Hardware names are truncated to this width.
-pub const NAME_MAX_W: u16 = 180;
+pub const NAME_MAX_W: u16 = 250;
 
 /// The whole canvas.
 pub const SCREEN: Rect = Rect { x: 0, y: 0, w: WIDTH, h: HEIGHT };
-/// Top bar holding title, date, clock and LIVE dot.
-pub const TOP_BAR: Rect = Rect { x: 0, y: 0, w: 480, h: 36 };
+/// Header: title and LIVE dot on the first row, date and clock on the second.
+pub const TOP_BAR: Rect = Rect { x: 0, y: 0, w: WIDTH, h: 54 };
 /// Title text position.
 pub const TITLE_POS: (u16, u16) = (12, 6);
 /// Title text.
 pub const TITLE: &str = "SYS://TELEMETRY";
-/// Date text box (ends before the clock).
-pub const DATE_BOX: Rect = Rect { x: 300, y: 12, w: 74, h: 17 };
-/// Clock text box (ends before the LIVE dot's glow at x = 461).
-pub const CLOCK_BOX: Rect = Rect { x: 376, y: 4, w: 84, h: 31 };
-/// LIVE dot.
-pub const LIVE_DOT: Rect = Rect { x: 462, y: 15, w: 6, h: 6 };
-const _: () = assert!(CLOCK_BOX.x + CLOCK_BOX.w < LIVE_DOT.x - 1, "clock box must end before the dot's glow");
-/// Horizontal divider under the top bar.
-pub const DIVIDER_Y: u16 = 38;
-/// Vertical divider between the columns, from [`DIVIDER_Y`] to the bottom.
-pub const COLUMN_DIVIDER_X: u16 = 240;
+/// LIVE dot, right of the title.
+pub const LIVE_DOT: Rect = Rect { x: 304, y: 15, w: 6, h: 6 };
+/// Date text box, second header row, left.
+pub const DATE_BOX: Rect = Rect { x: 12, y: 32, w: 120, h: 17 };
+/// Clock text box, second header row, right-hand side.
+pub const CLOCK_BOX: Rect = Rect { x: 204, y: 27, w: 104, h: 26 };
+const _: () = assert!(CLOCK_BOX.y + CLOCK_BOX.h <= TOP_BAR.h, "clock box must stay inside the header");
+/// Horizontal divider under the header.
+pub const DIVIDER_Y: u16 = 54;
+
+/// Left edge of full-width panel frames.
+const FRAME_X: u16 = 6;
+/// Width of full-width panel frames.
+const FRAME_W: u16 = 308;
+/// Left edge of content inside a full-width panel.
+const CONTENT_X: u16 = 12;
+/// Width of content inside a full-width panel.
+const CONTENT_W: u16 = 296;
 
 /// CPU panel frame.
-pub const CPU_FRAME: Rect = Rect { x: 6, y: 42, w: 228, h: 128 };
+pub const CPU_FRAME: Rect = Rect { x: FRAME_X, y: 58, w: FRAME_W, h: 120 };
 /// `CPU` label position.
-pub const CPU_LABEL: (u16, u16) = (12, 46);
+pub const CPU_LABEL: (u16, u16) = (CONTENT_X, 62);
 /// CPU name position.
-pub const CPU_NAME: (u16, u16) = (48, 46);
+pub const CPU_NAME: (u16, u16) = (48, 62);
 /// CPU load (`NN%`) text box.
-pub const CPU_LOAD_BOX: Rect = Rect { x: 12, y: 62, w: 126, h: 57 };
+pub const CPU_LOAD_BOX: Rect = Rect { x: CONTENT_X, y: 78, w: 126, h: 57 };
 /// CPU temperature text box.
-pub const CPU_TEMP_BOX: Rect = Rect { x: 140, y: 74, w: 92, h: 31 };
+pub const CPU_TEMP_BOX: Rect = Rect { x: 140, y: 90, w: 92, h: 31 };
 /// Per-thread load bars.
-pub const CPU_THREADS: Rect = Rect { x: 12, y: 124, w: 216, h: 40 };
+pub const CPU_THREADS: Rect = Rect { x: CONTENT_X, y: 140, w: CONTENT_W, h: 32 };
 
 /// GPU panel frame.
-pub const GPU_FRAME: Rect = Rect { x: 6, y: 176, w: 228, h: 136 };
+pub const GPU_FRAME: Rect = Rect { x: FRAME_X, y: 184, w: FRAME_W, h: 128 };
 /// `GPU` label position.
-pub const GPU_LABEL: (u16, u16) = (12, 180);
+pub const GPU_LABEL: (u16, u16) = (CONTENT_X, 188);
 /// GPU name position.
-pub const GPU_NAME: (u16, u16) = (48, 180);
+pub const GPU_NAME: (u16, u16) = (48, 188);
 /// Everything dynamic in the GPU panel, restored before each redraw.
-pub const GPU_BODY: Rect = Rect { x: 7, y: 194, w: 226, h: 117 };
+pub const GPU_BODY: Rect = Rect { x: FRAME_X + 1, y: 202, w: FRAME_W - 2, h: 109 };
 /// GPU load text box.
-pub const GPU_LOAD_BOX: Rect = Rect { x: 12, y: 196, w: 126, h: 57 };
+pub const GPU_LOAD_BOX: Rect = Rect { x: CONTENT_X, y: 204, w: 126, h: 57 };
 /// GPU temperature text box.
-pub const GPU_TEMP_BOX: Rect = Rect { x: 140, y: 208, w: 92, h: 31 };
+pub const GPU_TEMP_BOX: Rect = Rect { x: 140, y: 216, w: 92, h: 31 };
 /// `VRAM used / total GB` text box.
-pub const VRAM_BOX: Rect = Rect { x: 12, y: 258, w: 216, h: 17 };
+pub const VRAM_BOX: Rect = Rect { x: CONTENT_X, y: 264, w: CONTENT_W, h: 17 };
 /// VRAM bar.
-pub const VRAM_BAR: Rect = Rect { x: 12, y: 280, w: 216, h: 14 };
+pub const VRAM_BAR: Rect = Rect { x: CONTENT_X, y: 284, w: CONTENT_W, h: 14 };
 /// `OFFLINE` text box, shown when NVML is unavailable.
-pub const GPU_OFFLINE_BOX: Rect = Rect { x: 12, y: 210, w: 216, h: 31 };
+pub const GPU_OFFLINE_BOX: Rect = Rect { x: CONTENT_X, y: 218, w: CONTENT_W, h: 31 };
 
-/// Memory panel frame.
-pub const MEM_FRAME: Rect = Rect { x: 246, y: 42, w: 228, h: 66 };
+/// Width of the half-width memory and disk frames.
+const HALF_FRAME_W: u16 = 150;
+/// Width of content inside a half-width panel.
+const HALF_CONTENT_W: u16 = 138;
+/// Left edge of the disk frame (right half).
+const RIGHT_FRAME_X: u16 = 164;
+/// Left edge of content in the right half.
+const RIGHT_CONTENT_X: u16 = 170;
+
+/// Memory panel frame (left half).
+pub const MEM_FRAME: Rect = Rect { x: FRAME_X, y: 318, w: HALF_FRAME_W, h: 66 };
 /// `MEMORY` label position.
-pub const MEM_LABEL: (u16, u16) = (252, 46);
+pub const MEM_LABEL: (u16, u16) = (CONTENT_X, 322);
 /// Memory value text box.
-pub const MEM_VALUE_BOX: Rect = Rect { x: 252, y: 62, w: 216, h: 22 };
+pub const MEM_VALUE_BOX: Rect = Rect { x: CONTENT_X, y: 338, w: HALF_CONTENT_W, h: 22 };
 /// Memory bar.
-pub const MEM_BAR: Rect = Rect { x: 252, y: 88, w: 216, h: 14 };
+pub const MEM_BAR: Rect = Rect { x: CONTENT_X, y: 364, w: HALF_CONTENT_W, h: 14 };
 
-/// Disk panel frame.
-pub const DISK_FRAME: Rect = Rect { x: 246, y: 112, w: 228, h: 66 };
+/// Disk panel frame (right half).
+pub const DISK_FRAME: Rect = Rect { x: RIGHT_FRAME_X, y: 318, w: HALF_FRAME_W, h: 66 };
 /// `DISK C:` label position.
-pub const DISK_LABEL: (u16, u16) = (252, 116);
+pub const DISK_LABEL: (u16, u16) = (RIGHT_CONTENT_X, 322);
 /// Disk value text box.
-pub const DISK_VALUE_BOX: Rect = Rect { x: 252, y: 132, w: 216, h: 22 };
+pub const DISK_VALUE_BOX: Rect = Rect { x: RIGHT_CONTENT_X, y: 338, w: HALF_CONTENT_W, h: 22 };
 /// Disk bar.
-pub const DISK_BAR: Rect = Rect { x: 252, y: 158, w: 216, h: 14 };
+pub const DISK_BAR: Rect = Rect { x: RIGHT_CONTENT_X, y: 364, w: HALF_CONTENT_W, h: 14 };
 
 /// Network panel frame.
-pub const NET_FRAME: Rect = Rect { x: 246, y: 182, w: 228, h: 130 };
+pub const NET_FRAME: Rect = Rect { x: FRAME_X, y: 390, w: FRAME_W, h: 86 };
 /// `NET` label position.
-pub const NET_LABEL: (u16, u16) = (252, 186);
-/// `DN …` text box (ends before the `UP` text).
-pub const NET_DN_BOX: Rect = Rect { x: 252, y: 204, w: 108, h: 22 };
-/// `UP …` text box (ends inside the panel frame).
-pub const NET_UP_BOX: Rect = Rect { x: 362, y: 204, w: 110, h: 22 };
-/// Download sparkline.
-pub const NET_DN_SPARK: Rect = Rect { x: 252, y: 232, w: 216, h: 36 };
-/// Upload sparkline.
-pub const NET_UP_SPARK: Rect = Rect { x: 252, y: 272, w: 216, h: 36 };
+pub const NET_LABEL: (u16, u16) = (CONTENT_X, 394);
+/// `DN …` text box, left half.
+pub const NET_DN_BOX: Rect = Rect { x: CONTENT_X, y: 410, w: HALF_CONTENT_W, h: 22 };
+/// `UP …` text box, right half.
+pub const NET_UP_BOX: Rect = Rect { x: RIGHT_CONTENT_X, y: 410, w: HALF_CONTENT_W, h: 22 };
+/// Download sparkline, left half.
+pub const NET_DN_SPARK: Rect = Rect { x: CONTENT_X, y: 438, w: HALF_CONTENT_W, h: 32 };
+/// Upload sparkline, right half.
+pub const NET_UP_SPARK: Rect = Rect { x: RIGHT_CONTENT_X, y: 438, w: HALF_CONTENT_W, h: 32 };
 
-// `Canvas::flush` sends the two columns as separate rects only while more
-// than `DIRTY_GAP_PX` always-unchanged columns separate them: the left
-// column's widest dynamic box ends at x = 231, the right column's bar glow
-// starts at x = 251 (19 columns between).
+// `Canvas::flush` sends the two halves of a row (memory | disk, DN | UP) as
+// separate rects only while more than `DIRTY_GAP_PX` always-unchanged
+// columns separate them: left content (and its bar glow) ends at x = 150,
+// the right half's bar glow starts at x = 169 (18 columns between).
 const _: () = assert!(
-    MEM_BAR.x - 1 - (CPU_TEMP_BOX.x + CPU_TEMP_BOX.w) > turing_canvas::DIRTY_GAP_PX,
-    "dirty-rect split threshold must stay below the column gap"
+    RIGHT_CONTENT_X - 1 - (CONTENT_X + HALF_CONTENT_W + 1) > turing_canvas::DIRTY_GAP_PX,
+    "dirty-rect split threshold must stay below the memory/disk gap"
 );
 
 /// All panel frames, drawn on the backdrop.

@@ -9,7 +9,7 @@ Protocol reference: [`../docs/PROTOCOL.md`](../docs/PROTOCOL.md). Roadmap: [`../
 | `turing-device` | Discovery (`discover()`), serial transport (`Display::open`), `init`, `blit`, `show_rgb`. Generic over `std::io::Write`, tested on an in-memory sink. |
 | `turing-canvas` | RGB canvas: `fill`, `fill_rect`, `blend_rect` (alpha), `draw_line` / `line_points` (Bresenham), `draw_rect_outline`, `blit_from` (copy a rect from another canvas), `draw_rgb`, anti-aliased `draw_text` (fontdue, bundled Roboto), `measure_text`. `flush()` diffs against the last RGB565 frame and sends only dirty rects: changed rows grouped into bands, split wherever more than `DIRTY_GAP_PX` (16) unchanged columns or 2+ unchanged rows separate changes, so distant widgets on the same rows go out separately (full frame above 40 % change). `invalidate()` forces the next flush to send the full frame. |
 | `turing-daemon` | HTTP API binary. One render thread owns the `Display` and a `Canvas`; axum handlers send it operations and await the reply. Tested end-to-end against an in-memory serial sink. |
-| `turing-dashboard` | Cyberpunk telemetry dashboard binary: clock, CPU load/temperature/per-thread bars, GPU (NVML), memory, disk and network sparklines, refreshed once per second on wall-clock second boundaries. Reconnects after unplugging. Build with `--release` for always-on use: a debug build spends 60-75 ms of CPU per tick, release about 1 ms. |
+| `turing-dashboard` | Cyberpunk telemetry dashboard binary, portrait 320×480 (`--flip` for the panel mounted the other way up): clock, CPU load/temperature/per-thread bars, GPU (NVML), memory, disk and network sparklines, refreshed once per second on wall-clock second boundaries. Reconnects after unplugging; the port is auto-discovered by USB id. Build with `--release` for always-on use: a debug build spends 60-75 ms of CPU per tick, release about 1 ms. |
 
 ```bash
 cargo test --workspace
@@ -17,7 +17,8 @@ cargo run -p turing-device --example show_png -- ../tools/test_frame_preview.png
 cargo run -p turing-device --example show_png -- picture.jpg COM20                      # explicit port
 cargo run -p turing-canvas --example counter -- 10                                       # dirty-rect demo
 cargo run -p turing-daemon -- --listen 127.0.0.1:8686 [--port COM20] [--orientation portrait]
-cargo run --release -p turing-dashboard -- [--port COM20] [--interval 1000] [--ticks N] [--debug]   # --interval >= 200 ms; silent unless --debug
+cargo run --release -p turing-dashboard -- [--port COM20] [--flip] [--interval 1000] [--ticks N] [--debug]   # --interval >= 200 ms; silent unless --debug
+cargo run -p turing-dashboard --example preview -- out.png                              # render the dashboard to a PNG, no panel needed
 ```
 
 ## HTTP API (`turing-daemon`)

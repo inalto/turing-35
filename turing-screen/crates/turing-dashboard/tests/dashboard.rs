@@ -6,12 +6,12 @@ use std::time::Duration;
 
 use chrono::{Local, TimeZone};
 use turing_canvas::{Canvas, Color, Font};
-use turing_dashboard::dashboard::{delay_to_aligned_tick, interval_from_ms, run_with, Dashboard, ALIGN_SLACK, MIN_INTERVAL};
+use turing_dashboard::dashboard::{delay_to_aligned_tick, interval_from_ms, run_with, wake, Dashboard, ALIGN_SLACK, MIN_INTERVAL};
 use turing_dashboard::telemetry::{GpuStats, Ring, Sampler, Snapshot};
 use turing_dashboard::theme::*;
 use turing_dashboard::widgets::{bar, sparkline, text_box, thread_bars};
 use turing_device::Display;
-use turing_proto::{bitmap_header, Rect};
+use turing_proto::{bitmap_header, orientation, Orientation, Rect};
 
 const GIB: u64 = 1 << 30;
 
@@ -49,18 +49,18 @@ impl Sampler for FakeSampler {
 }
 
 fn sink() -> Display<Vec<u8>> {
-    Display::new(Vec::new(), None)
+    Display::with_orientation(Vec::new(), None, Orientation::Portrait)
 }
 
 fn backdrop() -> Canvas {
-    let mut c = Canvas::landscape();
+    let mut c = Canvas::new(WIDTH, HEIGHT);
     c.fill(BG);
     c
 }
 
 /// A copy of `src` (canvases are not `Clone`).
 fn copy(src: &Canvas) -> Canvas {
-    let mut c = Canvas::landscape();
+    let mut c = Canvas::new(WIDTH, HEIGHT);
     c.blit_from(src, SCREEN);
     c
 }
@@ -80,6 +80,11 @@ fn diff(a: &Canvas, b: &Canvas) -> Vec<(u16, u16)> {
 
 fn inside(r: Rect, (x, y): (u16, u16)) -> bool {
     x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
+}
+
+/// `r` grown by one pixel on every side (the glow around a frame).
+fn grow_rect(r: Rect) -> Rect {
+    Rect { x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2 }
 }
 
 fn count(c: &Canvas, r: Rect, color: Color) -> usize {
@@ -258,25 +263,34 @@ fn invalidate_makes_the_next_flush_a_full_frame() {
 }
 
 #[test]
-fn cpu_only_change_flushes_only_the_left_column() {
+fn canvas_is_portrait_and_every_panel_fits_on_it() {
+    assert_eq!((WIDTH, HEIGHT), Orientation::Portrait.size());
+    assert_eq!(SCREEN, Rect { x: 0, y: 0, w: 320, h: 480 });
+    for f in FRAMES {
+        assert!(f.x + f.w <= WIDTH - 1 && f.y + f.h <= HEIGHT - 1, "{f:?} (with its glow) leaves the screen");
+    }
+}
+
+#[test]
+fn memory_only_change_flushes_only_the_memory_panel() {
     let mut s = snapshot();
     let mut dash = Dashboard::new(&s);
     dash.render(&s);
     let mut d = sink();
     dash.canvas.flush(&mut d).unwrap();
-    s.cpu_load = 88.0;
-    s.cpu_cores = vec![95.0; 16];
+    s.mem_used = 27 * GIB;
     dash.render(&s);
     let sent = dash.canvas.flush(&mut d).unwrap();
     assert!(!sent.is_empty());
-    assert!(sent.iter().all(|r| r.x + r.w <= 240), "{sent:?}");
+    for r in &sent {
+        assert!(inside(grow_rect(MEM_FRAME), (r.x, r.y)) && r.x + r.w <= MEM_FRAME.x + MEM_FRAME.w, "{sent:?}");
+    }
 }
 
 #[test]
-fn busy_tick_never_flushes_a_rect_across_the_column_divider() {
-    // CPU, GPU, memory, disk and network all change in the same tick, so the
-    // left and right columns change on the same rows; each flushed rect must
-    // still stay on one side of the divider.
+fn busy_tick_never_flushes_a_rect_across_the_memory_disk_gap() {
+    // Memory and disk sit side by side, so they change on the same rows;
+    // each flushed rect must still stay on one side of the gap between them.
     let mut s = snapshot();
     let mut dash = Dashboard::new(&s);
     dash.render(&s);
@@ -297,10 +311,23 @@ fn busy_tick_never_flushes_a_rect_across_the_column_divider() {
     s.net_up_bps = 9.0 * 1024.0 * 1024.0;
     dash.render(&s);
     let sent = dash.canvas.flush(&mut d).unwrap();
-    assert!(sent.iter().any(|r| r.x + r.w <= COLUMN_DIVIDER_X && r.y > DIVIDER_Y), "{sent:?}");
-    assert!(sent.iter().any(|r| r.x >= COLUMN_DIVIDER_X && r.y > DIVIDER_Y), "{sent:?}");
-    for r in &sent {
-        assert!(r.x + r.w <= COLUMN_DIVIDER_X || r.x >= COLUMN_DIVIDER_X, "{r:?} crosses the divider in {sent:?}");
+    let (left, right) = (MEM_FRAME.x + MEM_FRAME.w, DISK_FRAME.x);
+    let in_row = |r: &Rect| r.y < MEM_FRAME.y + MEM_FRAME.h && r.y + r.h > MEM_FRAME.y;
+    assert!(sent.iter().any(|r| in_row(r) && r.x + r.w <= left), "{sent:?}");
+    assert!(sent.iter().any(|r| in_row(r) && r.x >= right), "{sent:?}");
+    for r in sent.iter().filter(|r| in_row(r)) {
+        assert!(r.x + r.w <= left || r.x >= right, "{r:?} crosses the memory/disk gap in {sent:?}");
+    }
+}
+
+#[test]
+fn wake_puts_the_display_in_portrait_or_flipped_portrait() {
+    for (flip, o) in [(false, Orientation::Portrait), (true, Orientation::PortraitFlipped)] {
+        let mut d = Display::new(Vec::new(), None);
+        wake(&mut d, flip).unwrap();
+        assert_eq!(d.size(), (320, 480));
+        let packet = orientation(o, 320, 480);
+        assert!(d.sink().windows(16).any(|w| w == packet), "orientation packet for {o:?} not sent");
     }
 }
 
@@ -353,7 +380,7 @@ fn clock_tick_flushes_a_rect_inside_the_top_bar() {
 #[test]
 fn widest_clock_ends_before_the_live_dot_glow() {
     let font = Font::default_font();
-    let mut c = Canvas::landscape();
+    let mut c = Canvas::new(WIDTH, HEIGHT);
     let painted = c.draw_text(CLOCK_BOX.x, CLOCK_BOX.y, "00:00:00", &font, CLOCK_PX, TEXT);
     assert!(painted.x + painted.w <= CLOCK_BOX.x + CLOCK_BOX.w, "{painted:?}");
     assert!(painted.y + painted.h <= TOP_BAR.h, "{painted:?}");
@@ -415,7 +442,7 @@ impl Sampler for TickingSampler {
     }
 }
 
-const FRAME_BYTES: usize = 6 + 480 * 320 * 2;
+const FRAME_BYTES: usize = 6 + 320 * 480 * 2;
 
 #[test]
 fn run_reconnects_after_a_write_error_and_resends_a_full_frame() {
@@ -427,7 +454,7 @@ fn run_reconnects_after_a_write_error_and_resends_a_full_frame() {
         let i = connects.get();
         connects.set(i + 1);
         let fail_after = (i == 0).then_some(FRAME_BYTES);
-        Ok(Display::new(TestSink { fail_after, bytes: sinks[i].clone() }, None))
+        Ok(Display::with_orientation(TestSink { fail_after, bytes: sinks[i].clone() }, None, Orientation::Portrait))
     };
     let mut sampler = TickingSampler(snapshot());
     let interval = Duration::from_millis(1);
@@ -446,7 +473,7 @@ fn run_survives_a_display_that_fails_immediately() {
     let mut connect = || -> Connect {
         connects.set(connects.get() + 1);
         let fail_after = (connects.get() == 1).then_some(0);
-        Ok(Display::new(TestSink { fail_after, bytes: bytes.clone() }, None))
+        Ok(Display::with_orientation(TestSink { fail_after, bytes: bytes.clone() }, None, Orientation::Portrait))
     };
     let mut sampler = FakeSampler(snapshot());
     let interval = Duration::from_millis(1);
@@ -478,7 +505,7 @@ impl Sampler for CountingSampler {
 #[test]
 fn run_takes_one_warm_up_sample_before_the_first_frame() {
     let bytes = Arc::new(Mutex::new(Vec::new()));
-    let mut connect = || -> Connect { Ok(Display::new(TestSink { fail_after: None, bytes: bytes.clone() }, None)) };
+    let mut connect = || -> Connect { Ok(Display::with_orientation(TestSink { fail_after: None, bytes: bytes.clone() }, None, Orientation::Portrait)) };
     let mut sampler = CountingSampler(snapshot(), 0);
     run_with(&mut sampler, &mut connect, Duration::from_millis(1), Some(2), Duration::ZERO, &mut std::io::sink()).unwrap();
     assert_eq!(sampler.1, 3, "warm-up + one per tick");
@@ -548,7 +575,7 @@ fn interval_is_floored_at_the_sysinfo_minimum() {
 #[test]
 fn run_logs_one_line_per_tick_to_the_given_sink() {
     let bytes = Arc::new(Mutex::new(Vec::new()));
-    let mut connect = || -> Connect { Ok(Display::new(TestSink { fail_after: None, bytes: bytes.clone() }, None)) };
+    let mut connect = || -> Connect { Ok(Display::with_orientation(TestSink { fail_after: None, bytes: bytes.clone() }, None, Orientation::Portrait)) };
     let mut sampler = TickingSampler(snapshot());
     let mut log = Vec::new();
     run_with(&mut sampler, &mut connect, Duration::from_millis(1), Some(2), Duration::ZERO, &mut log).unwrap();
@@ -562,7 +589,7 @@ fn run_logs_one_line_per_tick_to_the_given_sink() {
 #[test]
 fn run_with_a_null_sink_writes_nothing_but_still_renders() {
     let bytes = Arc::new(Mutex::new(Vec::new()));
-    let mut connect = || -> Connect { Ok(Display::new(TestSink { fail_after: None, bytes: bytes.clone() }, None)) };
+    let mut connect = || -> Connect { Ok(Display::with_orientation(TestSink { fail_after: None, bytes: bytes.clone() }, None, Orientation::Portrait)) };
     let mut sampler = TickingSampler(snapshot());
     run_with(&mut sampler, &mut connect, Duration::from_millis(1), Some(2), Duration::ZERO, &mut std::io::sink()).unwrap();
     assert!(bytes.lock().unwrap().len() > FRAME_BYTES);

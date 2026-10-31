@@ -39,6 +39,15 @@ fn sink_display() -> Display<Vec<u8>> {
 }
 
 #[test]
+fn with_orientation_sets_the_size_without_writing_anything() {
+    let d = Display::with_orientation(Vec::new(), None, Orientation::Portrait);
+    assert_eq!(d.size(), (320, 480));
+    assert!(d.sink().is_empty());
+    let mut d = d;
+    assert!(d.blit(Rect { x: 0, y: 400, w: 1, h: 1 }, &[0, 0]).is_ok(), "row 400 exists in portrait");
+}
+
+#[test]
 fn blit_writes_header_then_pixels_in_order() {
     let mut d = sink_display();
     let rect = Rect { x: 20, y: 20, w: 2, h: 1 };

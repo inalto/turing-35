@@ -16,3 +16,6 @@ turing-canvas = { workspace = true }
 sysinfo = { workspace = true }
 nvml-wrapper = { workspace = true }
 chrono = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true }

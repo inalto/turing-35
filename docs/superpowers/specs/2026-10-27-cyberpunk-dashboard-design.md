@@ -27,7 +27,7 @@ Windows is verified), CPU temperature on AMD without an external tool.
 
 ## Visual design
 
-Canvas 480×320, landscape. Palette:
+Canvas 320×480, portrait since the 2026-10-31 revision below (the original 480×320 landscape layout follows for reference). Palette:
 
 | Name | Hex | Use |
 |---|---|---|
@@ -43,7 +43,29 @@ alpha 10; scanlines (every 3rd row) blended black at alpha 40; panel frames as 1
 outlines at alpha 110 with a 1-px outer glow at alpha 40; all labels and hardware names.
 Dynamic widgets restore their rect from the backdrop, then redraw.
 
-### Layout (x, y, w, h)
+### Layout (x, y, w, h) — portrait, 2026-10-31
+
+The panel is mounted upright, so the five panels stack in one 308-px-wide column; memory and
+disk share a row, as do the two network sparklines. `--flip` selects `PortraitFlipped` for a
+panel mounted with the cable at the other edge. `theme.rs` is the source of truth.
+
+Header (0,0,320,54): title `SYS://TELEMETRY` at (12,6) size 22 `CYAN`; `LIVE` dot 6×6
+`MAGENTA` at (304,15); date at (12,32) size 14 `DIM`; clock `HH:MM:SS` in (204,27,104,26) size
+21 `TEXT`. Divider line y=54.
+
+- CPU frame (6,58,308,120): label (12,62), name (48,62) truncated to 250 px; load (12,78) size
+  48; temperature (140,90) size 26; thread bars (12,140,296,32).
+- GPU frame (6,184,308,128): label (188); load (12,204); temperature (140,216); VRAM text
+  (12,264,296,17); VRAM bar (12,284,296,14); `OFFLINE` at (12,218).
+- Memory frame (6,318,150,66): label (12,322); value (12,338,138,22); bar (12,364,138,14).
+- Disk frame (164,318,150,66): same at x=170.
+- Net frame (6,390,308,86): label (12,394); `DN` (12,410,138,22) `CYAN`; `UP` (170,410,138,22)
+  `MAGENTA`; down sparkline (12,438,138,32); up sparkline (170,438,138,32).
+
+Left and right halves are 18 unchanged columns apart (x 151..168), more than `DIRTY_GAP_PX`, so
+memory/disk and DN/UP flush as separate rects (asserted at compile time in `theme.rs`).
+
+### Original layout (x, y, w, h) — landscape 480×320, superseded
 
 Top bar (0,0,480,36): title `SYS://TELEMETRY` at (12,6) size 22 `CYAN`; date at (300,12)
 size 14 `DIM`; clock `HH:MM:SS` at (376,4) size 21 `TEXT` (26 would overrun the LIVE dot); `LIVE` dot: 6×6 `MAGENTA` at

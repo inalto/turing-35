@@ -98,7 +98,13 @@ impl Display<Box<dyn SerialPort>> {
 impl<W: Write> Display<W> {
     /// Wrap an already-open sink. The logical size starts as landscape 480x320.
     pub fn new(sink: W, pacing: Option<Duration>) -> Self {
-        Self { sink, pacing, size: Orientation::Landscape.size() }
+        Self::with_orientation(sink, pacing, Orientation::Landscape)
+    }
+
+    /// Wrap an already-open sink whose panel is already in orientation `o`,
+    /// so blits are bounds-checked against that size without sending anything.
+    pub fn with_orientation(sink: W, pacing: Option<Duration>, o: Orientation) -> Self {
+        Self { sink, pacing, size: o.size() }
     }
 
     /// Current logical `(width, height)`.

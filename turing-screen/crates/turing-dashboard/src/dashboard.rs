@@ -195,8 +195,6 @@ fn draw_backdrop(s: &Snapshot, font: &Font) -> Canvas {
         blend_outline(&mut c, frame, CYAN, FRAME_ALPHA);
     }
     c.blend_rect(Rect { x: 0, y: DIVIDER_Y, w: WIDTH, h: 1 }, CYAN, FRAME_ALPHA);
-    let below = Rect { x: COLUMN_DIVIDER_X, y: DIVIDER_Y + 1, w: 1, h: HEIGHT - DIVIDER_Y - 1 };
-    c.blend_rect(below, CYAN, FRAME_ALPHA);
 
     c.draw_text(TITLE_POS.0, TITLE_POS.1, TITLE, font, TITLE_PX, CYAN);
     c.blend_rect(grow(LIVE_DOT), MAGENTA, BAR_GLOW_ALPHA);
@@ -217,9 +215,16 @@ fn draw_backdrop(s: &Snapshot, font: &Font) -> Canvas {
     c
 }
 
-/// Open the display on `port` (or the first discovered one) and wake it:
-/// screen on, landscape, full brightness.
-fn connect(port: Option<&str>, log: &mut dyn Write) -> Result<Display<impl Write>, Box<dyn Error>> {
+/// Wake `display` for the dashboard: screen on, portrait (upside down when
+/// `flip` is set, for a panel mounted with its cable at the other edge),
+/// full brightness.
+pub fn wake<W: Write>(display: &mut Display<W>, flip: bool) -> turing_device::Result<()> {
+    let o = if flip { Orientation::PortraitFlipped } else { Orientation::Portrait };
+    display.init(o, BRIGHTNESS)
+}
+
+/// Open the display on `port` (or the first discovered one) and [`wake`] it.
+fn connect(port: Option<&str>, flip: bool, log: &mut dyn Write) -> Result<Display<impl Write>, Box<dyn Error>> {
     let port = match port {
         Some(p) => p.to_string(),
         None => discover()?
@@ -229,14 +234,15 @@ fn connect(port: Option<&str>, log: &mut dyn Write) -> Result<Display<impl Write
             .clone(),
     };
     let mut display = Display::open(&port)?;
-    display.init(Orientation::Landscape, BRIGHTNESS)?;
+    wake(&mut display, flip)?;
     let _ = writeln!(log, "display: {port}");
     Ok(display)
 }
 
 /// Run the dashboard on the serial display at `port` (auto-discovered when
-/// `None`), refreshing every `interval`; stop after `ticks` rendered frames,
-/// or never. The port is released when this returns.
+/// `None`), in portrait (flipped when `flip` is set), refreshing every
+/// `interval`; stop after `ticks` rendered frames, or never. The port is
+/// released when this returns.
 ///
 /// With `ticks` set, fails if no display can be opened at start. Otherwise
 /// display errors, including a display missing at start, are logged and
@@ -245,13 +251,14 @@ fn connect(port: Option<&str>, log: &mut dyn Write) -> Result<Display<impl Write
 pub fn run(
     sampler: &mut dyn Sampler,
     port: Option<String>,
+    flip: bool,
     interval: Duration,
     ticks: Option<u64>,
     debug: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut log: Box<dyn Write> = if debug { Box::new(io::stderr()) } else { Box::new(io::sink()) };
     let mut log_for_connect: Box<dyn Write> = if debug { Box::new(io::stderr()) } else { Box::new(io::sink()) };
-    run_with(sampler, &mut || connect(port.as_deref(), &mut log_for_connect), interval, ticks, RETRY, &mut log)
+    run_with(sampler, &mut || connect(port.as_deref(), flip, &mut log_for_connect), interval, ticks, RETRY, &mut log)
 }
 
 /// The run loop behind [`run`], with the display factory and retry delay

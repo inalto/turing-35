@@ -1062,6 +1062,7 @@ name = "turing-dashboard"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "image",
  "nvml-wrapper",
  "sysinfo",
  "turing-canvas",
